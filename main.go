@@ -207,17 +207,23 @@ func (m model) View() string {
 		fixVersions := strings.Join(versionNames, ", ")
 
 		if isSelected {
-			b.WriteString(selectedIndicator.Render("> "))
-			b.WriteString(keySelectedStyle.Render(issue.Key))
+			// Pad lines to full width for background highlight
+			lineWidth := m.width
+			if lineWidth < 10 {
+				lineWidth = 40
+			}
+			keyLine := fmt.Sprintf("%-*s", lineWidth, "  "+issue.Key)
+			summaryLine := fmt.Sprintf("%-*s", lineWidth, "  "+summary)
+			priorityLine := fmt.Sprintf("%-*s", lineWidth, "  "+priority)
+			fixVersionLine := fmt.Sprintf("%-*s", lineWidth, "  "+fixVersions)
+
+			b.WriteString(keySelectedStyle.Render(keyLine))
 			b.WriteString("\n")
-			b.WriteString("  ")
-			b.WriteString(summarySelectedStyle.Render(summary))
+			b.WriteString(summarySelectedStyle.Render(summaryLine))
 			b.WriteString("\n")
-			b.WriteString("  ")
-			b.WriteString(prioritySelectedStyle.Render(priority))
+			b.WriteString(prioritySelectedStyle.Render(priorityLine))
 			b.WriteString("\n")
-			b.WriteString("  ")
-			b.WriteString(fixVersionSelectedStyle.Render(fixVersions))
+			b.WriteString(fixVersionSelectedStyle.Render(fixVersionLine))
 		} else {
 			b.WriteString("  ")
 			b.WriteString(keyStyle.Render(issue.Key))
