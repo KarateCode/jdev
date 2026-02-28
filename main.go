@@ -23,6 +23,9 @@ type Issue struct {
 		FixVersions []struct {
 			Name string `json:"name"`
 		} `json:"fixVersions"`
+		IssueType struct {
+			Name string `json:"name"`
+		} `json:"issuetype"`
 	} `json:"fields"`
 }
 
@@ -79,6 +82,18 @@ var (
 				Foreground(lipgloss.Color("212")). // Pink
 				Bold(true)
 )
+
+// Get icon for issue type
+func getIssueTypeIcon(issueType string) string {
+	switch issueType {
+	case "Story":
+		return "📖"
+	case "Bug":
+		return "🐛"
+	default:
+		return issueType
+	}
+}
 
 // Messages
 type issuesMsg []Issue
@@ -150,6 +165,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return viewFinishedMsg{err}
 				})
 			}
+		case "m":
+			// Move the selected issue
+			if len(m.issues) > 0 {
+				key := m.issues[m.cursor].Key
+				cmd := exec.Command("jira", "issue", "move", key)
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+					return viewFinishedMsg{err}
+				})
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -214,13 +238,16 @@ func (m model) View() string {
 		}
 		fixVersions := strings.Join(versionNames, ", ")
 
+		// Get issue type icon
+		issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name)
+
 		if isSelected {
 			// Pad lines to full width for background highlight
 			lineWidth := m.width
 			if lineWidth < 10 {
 				lineWidth = 40
 			}
-			keyLine := fmt.Sprintf("%-*s", lineWidth, "  "+issue.Key)
+			keyLine := fmt.Sprintf("%-*s", lineWidth, "  "+issueTypeIcon+" "+issue.Key)
 			summaryLine := fmt.Sprintf("%-*s", lineWidth, "  "+summary)
 			priorityLine := fmt.Sprintf("%-*s", lineWidth, "  "+priority)
 			fixVersionLine := fmt.Sprintf("%-*s", lineWidth, "  "+fixVersions)
@@ -234,6 +261,7 @@ func (m model) View() string {
 			b.WriteString(fixVersionSelectedStyle.Render(fixVersionLine))
 		} else {
 			b.WriteString("  ")
+			b.WriteString(issueTypeIcon + " ")
 			b.WriteString(keyStyle.Render(issue.Key))
 			b.WriteString("\n")
 			b.WriteString(summaryStyle.Render("  " + summary))
