@@ -137,6 +137,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// View the selected issue
 			if len(m.issues) > 0 {
 				key := m.issues[m.cursor].Key
+				if os.Getenv("TMUX") != "" {
+					// Running inside tmux, use popup
+					cmd := exec.Command("tmux", "display-popup", "-E", "-w", "80%", "-h", "80%", "-x", "10", "-y", "5",
+						fmt.Sprintf("jira issue view %s --comments 50", key))
+					cmd.Run()
+					return m, nil
+				}
+				// Fallback: suspend TUI and run directly
 				cmd := exec.Command("jira", "issue", "view", key, "--comments", "50")
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 					return viewFinishedMsg{err}
