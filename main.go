@@ -31,14 +31,15 @@ type Issue struct {
 
 // Model holds the application state
 type model struct {
-	issues   []Issue
-	cursor   int
-	width    int
-	height   int
-	err      error
-	loading  bool
-	spinner  spinner.Model
-	showHelp bool
+	issues    []Issue
+	cursor    int
+	width     int
+	height    int
+	err       error
+	loading   bool
+	spinner   spinner.Model
+	showHelp  bool
+	tableView bool
 }
 
 // Styles
@@ -100,6 +101,44 @@ var (
 
 	helpDescStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
+
+	// Table styles
+	tableHeaderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("255")).
+				Bold(true).
+				BorderBottom(true).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color("240"))
+
+	tableRowStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+	tableRowSelectedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("255")).
+				Background(lipgloss.Color("236"))
+
+	tableCellKeyStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("86")).
+				Bold(true)
+
+	tableCellKeySelectedStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("86")).
+					Bold(true).
+					Background(lipgloss.Color("236"))
+
+	tableCellPriorityStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214"))
+
+	tableCellPrioritySelectedStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("214")).
+					Background(lipgloss.Color("236"))
+
+	tableCellFixVersionStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("183"))
+
+	tableCellFixVersionSelectedStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("183")).
+						Background(lipgloss.Color("236"))
 )
 
 // Get icon for issue type
@@ -176,6 +215,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.issues)-1 {
 				m.cursor++
 			}
+		case "t":
+			// Toggle between list and table view
+			m.tableView = !m.tableView
+			return m, nil
 		case "r":
 			// Refresh issues
 			m.loading = true
@@ -233,19 +276,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() string {
-	if m.loading {
-		return m.spinner.View() + " Loading issues..."
-	}
-
-	if m.err != nil {
-		return fmt.Sprintf("Error: %v\n\nPress 'r' to retry, 'q' to quit.", m.err)
-	}
-
-	if len(m.issues) == 0 {
-		return "No issues found.\n\nPress 'r' to refresh, 'q' to quit."
-	}
-
+func (m model) renderListView() string {
 	var b strings.Builder
 
 	for i, issue := range m.issues {
@@ -305,7 +336,124 @@ func (m model) View() string {
 		b.WriteString("\n\n")
 	}
 
-	content := b.String()
+	return b.String()
+}
+
+func (m model) renderTableView() string {
+	var b strings.Builder
+
+	// Define column widths
+	typeCol := 4
+	keyCol := 12
+	priorityCol := 10
+	versionCol := 15
+	// Summary takes remaining space
+	summaryCol := m.width - typeCol - keyCol - priorityCol - versionCol - 6 // 6 for spacing
+	if summaryCol < 20 {
+		summaryCol = 20
+	}
+
+	// Header
+	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s",
+		typeCol, "Type",
+		keyCol, "Key",
+		summaryCol, "Summary",
+		priorityCol, "Priority",
+		versionCol, "Version")
+	b.WriteString(tableHeaderStyle.Render(header))
+	b.WriteString("\n")
+
+	// Rows
+	for i, issue := range m.issues {
+		isSelected := i == m.cursor
+
+		// Get issue type icon
+		issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name)
+
+		// Truncate summary
+		summary := issue.Fields.Summary
+		if len(summary) > summaryCol {
+			summary = summary[:summaryCol-3] + "..."
+		}
+
+		priority := issue.Fields.Priority.Name
+
+		// Join fix version names
+		var versionNames []string
+		for _, v := range issue.Fields.FixVersions {
+			versionNames = append(versionNames, v.Name)
+		}
+		fixVersions := strings.Join(versionNames, ", ")
+		if len(fixVersions) > versionCol {
+			fixVersions = fixVersions[:versionCol-3] + "..."
+		}
+
+		if isSelected {
+			// Build selected row with background
+			lineWidth := m.width
+			if lineWidth < 10 {
+				lineWidth = 80
+			}
+
+			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
+			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
+			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
+			priorityCell := fmt.Sprintf("%-*s", priorityCol, priority)
+			versionCell := fmt.Sprintf("%-*s", versionCol, fixVersions)
+
+			row := tableRowSelectedStyle.Render(typeCell) +
+				tableCellKeySelectedStyle.Render(" "+keyCell) +
+				tableRowSelectedStyle.Render(" "+summaryCell) +
+				tableCellPrioritySelectedStyle.Render(" "+priorityCell) +
+				tableCellFixVersionSelectedStyle.Render(" "+versionCell)
+
+			// Pad to full width
+			rowWidth := lipgloss.Width(row)
+			if rowWidth < lineWidth {
+				row += tableRowSelectedStyle.Render(strings.Repeat(" ", lineWidth-rowWidth))
+			}
+
+			b.WriteString(row)
+		} else {
+			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
+			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
+			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
+			priorityCell := fmt.Sprintf("%-*s", priorityCol, priority)
+			versionCell := fmt.Sprintf("%-*s", versionCol, fixVersions)
+
+			row := tableRowStyle.Render(typeCell) +
+				tableCellKeyStyle.Render(" "+keyCell) +
+				tableRowStyle.Render(" "+summaryCell) +
+				tableCellPriorityStyle.Render(" "+priorityCell) +
+				tableCellFixVersionStyle.Render(" "+versionCell)
+
+			b.WriteString(row)
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m model) View() string {
+	if m.loading {
+		return m.spinner.View() + " Loading issues..."
+	}
+
+	if m.err != nil {
+		return fmt.Sprintf("Error: %v\n\nPress 'r' to retry, 'q' to quit.", m.err)
+	}
+
+	if len(m.issues) == 0 {
+		return "No issues found.\n\nPress 'r' to refresh, 'q' to quit."
+	}
+
+	var content string
+	if m.tableView {
+		content = m.renderTableView()
+	} else {
+		content = m.renderListView()
+	}
 
 	// Overlay help modal if active
 	if m.showHelp {
@@ -319,12 +467,13 @@ func (m model) View() string {
 		lines := []string{
 			titleStyle.Render("Keyboard Shortcuts"),
 			"",
-			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down  "),
-			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up    "),
-			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue "),
-			keyStyle.Render("m         ") + descStyle.Render("  Move issue "),
-			keyStyle.Render("r         ") + descStyle.Render("  Refresh    "),
-			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit       "),
+			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down   "),
+			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up     "),
+			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue  "),
+			keyStyle.Render("m         ") + descStyle.Render("  Move issue  "),
+			keyStyle.Render("t         ") + descStyle.Render("  Toggle view "),
+			keyStyle.Render("r         ") + descStyle.Render("  Refresh     "),
+			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit        "),
 			"",
 			descStyle.Render("Press ?, Esc, or Ctrl+g to close"),
 		}
