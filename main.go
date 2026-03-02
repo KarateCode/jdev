@@ -31,13 +31,14 @@ type Issue struct {
 
 // Model holds the application state
 type model struct {
-	issues  []Issue
-	cursor  int
-	width   int
-	height  int
-	err     error
-	loading bool
-	spinner spinner.Model
+	issues   []Issue
+	cursor   int
+	width    int
+	height   int
+	err      error
+	loading  bool
+	spinner  spinner.Model
+	showHelp bool
 }
 
 // Styles
@@ -81,6 +82,24 @@ var (
 	selectedIndicator = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("212")). // Pink
 				Bold(true)
+
+	helpBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("86")).
+			Padding(1, 2).
+			Background(lipgloss.Color("235"))
+
+	helpTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("86")).
+			Bold(true).
+			MarginBottom(1)
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
+
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
 )
 
 // Get icon for issue type
@@ -133,7 +152,20 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle help modal toggle
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc", "ctrl+g":
+				m.showHelp = false
+				return m, nil
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
+		case "?":
+			m.showHelp = true
+			return m, nil
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "up", "ctrl+p", "k":
@@ -273,7 +305,37 @@ func (m model) View() string {
 		b.WriteString("\n\n")
 	}
 
-	return b.String()
+	content := b.String()
+
+	// Overlay help modal if active
+	if m.showHelp {
+		bg := lipgloss.Color("235")
+
+		titleStyle := helpTitleStyle.Background(bg)
+		keyStyle := helpKeyStyle.Background(bg)
+		descStyle := helpDescStyle.Background(bg)
+
+		// Build each line with consistent width
+		lines := []string{
+			titleStyle.Render("Keyboard Shortcuts"),
+			"",
+			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down  "),
+			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up    "),
+			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue "),
+			keyStyle.Render("m         ") + descStyle.Render("  Move issue "),
+			keyStyle.Render("r         ") + descStyle.Render("  Refresh    "),
+			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit       "),
+			"",
+			descStyle.Render("Press ?, Esc, or Ctrl+g to close"),
+		}
+
+		help := strings.Join(lines, "\n")
+		helpBox := helpBoxStyle.Render(help)
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, helpBox)
+	}
+
+	return content
 }
 
 func main() {
