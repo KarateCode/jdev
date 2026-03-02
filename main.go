@@ -29,6 +29,25 @@ type Issue struct {
 	} `json:"fields"`
 }
 
+// Filter types
+type filterType int
+
+const (
+	filterDevReview filterType = iota
+	filterAssignedToMe
+)
+
+func (f filterType) title() string {
+	switch f {
+	case filterDevReview:
+		return "Dev Review"
+	case filterAssignedToMe:
+		return "Issues Assigned to Me"
+	default:
+		return "Issues"
+	}
+}
+
 // Model holds the application state
 type model struct {
 	issues    []Issue
@@ -40,6 +59,7 @@ type model struct {
 	spinner   spinner.Model
 	showHelp  bool
 	tableView bool
+	filter    filterType
 }
 
 // Styles
@@ -102,6 +122,12 @@ var (
 	helpDescStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
+	// Title style
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("212")).
+			Bold(true).
+			MarginBottom(1)
+
 	// Table styles
 	tableHeaderStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("255")).
@@ -159,19 +185,35 @@ type errMsg error
 type viewFinishedMsg struct{ err error }
 
 // Fetch issues from Jira CLI
-func fetchIssues() tea.Msg {
-	cmd := exec.Command("jira", "issue", "list", "-sDev Review", "--raw")
-	output, err := cmd.Output()
-	if err != nil {
-		return errMsg(err)
-	}
+func fetchIssues(filter filterType) tea.Cmd {
+	return func() tea.Msg {
+		var cmd *exec.Cmd
+		switch filter {
+		case filterAssignedToMe:
+			// Get current user
+			meCmd := exec.Command("jira", "me")
+			meOutput, err := meCmd.Output()
+			if err != nil {
+				return errMsg(err)
+			}
+			me := strings.TrimSpace(string(meOutput))
+			cmd = exec.Command("jira", "issue", "list", "-a"+me, "--raw")
+		default:
+			cmd = exec.Command("jira", "issue", "list", "-sDev Review", "--raw")
+		}
 
-	var issues []Issue
-	if err := json.Unmarshal(output, &issues); err != nil {
-		return errMsg(err)
-	}
+		output, err := cmd.Output()
+		if err != nil {
+			return errMsg(err)
+		}
 
-	return issuesMsg(issues)
+		var issues []Issue
+		if err := json.Unmarshal(output, &issues); err != nil {
+			return errMsg(err)
+		}
+
+		return issuesMsg(issues)
+	}
 }
 
 func initialModel() model {
@@ -185,7 +227,7 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchIssues)
+	return tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -219,10 +261,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle between list and table view
 			m.tableView = !m.tableView
 			return m, nil
+		case "f":
+			// Toggle filter
+			if m.filter == filterDevReview {
+				m.filter = filterAssignedToMe
+			} else {
+				m.filter = filterDevReview
+			}
+			m.loading = true
+			m.cursor = 0
+			return m, tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
 		case "r":
 			// Refresh issues
 			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, fetchIssues)
+			return m, tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
 		case "enter", "v":
 			// View the selected issue
 			if len(m.issues) > 0 {
@@ -278,6 +330,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) renderListView() string {
 	var b strings.Builder
+
+	// Title
+	b.WriteString(titleStyle.Render(m.filter.title()))
+	b.WriteString("\n\n")
 
 	for i, issue := range m.issues {
 		isSelected := i == m.cursor
@@ -341,6 +397,10 @@ func (m model) renderListView() string {
 
 func (m model) renderTableView() string {
 	var b strings.Builder
+
+	// Title
+	b.WriteString(titleStyle.Render(m.filter.title()))
+	b.WriteString("\n\n")
 
 	// Define column widths
 	typeCol := 4
@@ -467,13 +527,14 @@ func (m model) View() string {
 		lines := []string{
 			titleStyle.Render("Keyboard Shortcuts"),
 			"",
-			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down   "),
-			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up     "),
-			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue  "),
-			keyStyle.Render("m         ") + descStyle.Render("  Move issue  "),
-			keyStyle.Render("t         ") + descStyle.Render("  Toggle view "),
-			keyStyle.Render("r         ") + descStyle.Render("  Refresh     "),
-			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit        "),
+			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down     "),
+			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up       "),
+			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue    "),
+			keyStyle.Render("m         ") + descStyle.Render("  Move issue    "),
+			keyStyle.Render("t         ") + descStyle.Render("  Toggle view   "),
+			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter "),
+			keyStyle.Render("r         ") + descStyle.Render("  Refresh       "),
+			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit          "),
 			"",
 			descStyle.Render("Press ?, Esc, or Ctrl+g to close"),
 		}
