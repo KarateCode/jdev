@@ -165,6 +165,9 @@ var (
 	tableCellFixVersionSelectedStyle = lipgloss.NewStyle().
 						Foreground(lipgloss.Color("183")).
 						Background(lipgloss.Color("236"))
+
+	devOpsIconStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("75")) // Blue
 )
 
 // Get icon for issue type
@@ -174,6 +177,8 @@ func getIssueTypeIcon(issueType string) string {
 		return "📖"
 	case "Bug":
 		return "🐛"
+	case "DevOps":
+		return devOpsIconStyle.Render("</>")
 	default:
 		return issueType
 	}
@@ -300,6 +305,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 					return viewFinishedMsg{err}
 				})
+			}
+		case "o":
+			// Open the selected issue in browser
+			if len(m.issues) > 0 {
+				key := m.issues[m.cursor].Key
+				url := fmt.Sprintf("https://envoyplatform.atlassian.net/jira/software/c/projects/EP/boards/35?selectedIssue=%s", key)
+				exec.Command("open", url).Run()
+				return m, nil
 			}
 		}
 
@@ -527,14 +540,15 @@ func (m model) View() string {
 		lines := []string{
 			titleStyle.Render("Keyboard Shortcuts"),
 			"",
-			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down     "),
-			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up       "),
-			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue    "),
-			keyStyle.Render("m         ") + descStyle.Render("  Move issue    "),
-			keyStyle.Render("t         ") + descStyle.Render("  Toggle view   "),
-			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter "),
-			keyStyle.Render("r         ") + descStyle.Render("  Refresh       "),
-			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit          "),
+			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down      "),
+			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up        "),
+			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue     "),
+			keyStyle.Render("o         ") + descStyle.Render("  Open in browser"),
+			keyStyle.Render("m         ") + descStyle.Render("  Move issue     "),
+			keyStyle.Render("t         ") + descStyle.Render("  Toggle view    "),
+			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter  "),
+			keyStyle.Render("r         ") + descStyle.Render("  Refresh        "),
+			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit           "),
 			"",
 			descStyle.Render("Press ?, Esc, or Ctrl+g to close"),
 		}
