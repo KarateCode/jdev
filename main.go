@@ -26,6 +26,9 @@ type Issue struct {
 		IssueType struct {
 			Name string `json:"name"`
 		} `json:"issuetype"`
+		Status struct {
+			Name string `json:"name"`
+		} `json:"status"`
 	} `json:"fields"`
 }
 
@@ -160,6 +163,13 @@ var (
 
 	tableCellPrioritySelectedStyle = lipgloss.NewStyle().
 					Foreground(lipgloss.Color("214")).
+					Background(lipgloss.Color("236"))
+
+	tableCellStatusStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("114")) // Green
+
+	tableCellStatusSelectedStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("114")).
 					Background(lipgloss.Color("236"))
 
 	tableCellFixVersionStyle = lipgloss.NewStyle().
@@ -426,19 +436,21 @@ func (m model) renderTableView() string {
 	// Define column widths
 	typeCol := 4
 	keyCol := 12
+	statusCol := 12
 	priorityCol := 10
 	versionCol := 15
 	// Summary takes remaining space
-	summaryCol := m.width - typeCol - keyCol - priorityCol - versionCol - 6 // 6 for spacing
+	summaryCol := m.width - typeCol - keyCol - statusCol - priorityCol - versionCol - 7 // 7 for spacing
 	if summaryCol < 20 {
 		summaryCol = 20
 	}
 
 	// Header
-	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s",
-		typeCol, "Type",
+	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s %-*s",
+		typeCol, "Type ",
 		keyCol, "Key",
 		summaryCol, "Summary",
+		statusCol, "Status",
 		priorityCol, "Priority",
 		versionCol, "Version")
 	b.WriteString(tableHeaderStyle.Render(header))
@@ -458,6 +470,10 @@ func (m model) renderTableView() string {
 		}
 
 		priority := issue.Fields.Priority.Name
+		status := issue.Fields.Status.Name
+		if len(status) > statusCol {
+			status = status[:statusCol-3] + "..."
+		}
 
 		// Join fix version names
 		var versionNames []string
@@ -479,12 +495,14 @@ func (m model) renderTableView() string {
 			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
 			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
 			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
+			statusCell := fmt.Sprintf("%-*s", statusCol, status)
 			priorityCell := fmt.Sprintf("%-*s", priorityCol, priority)
 			versionCell := fmt.Sprintf("%-*s", versionCol, fixVersions)
 
 			row := tableRowSelectedStyle.Render(typeCell) +
 				tableCellKeySelectedStyle.Render(" "+keyCell) +
 				tableRowSelectedStyle.Render(" "+summaryCell) +
+				tableCellStatusSelectedStyle.Render(" "+statusCell) +
 				tableCellPrioritySelectedStyle.Render(" "+priorityCell) +
 				tableCellFixVersionSelectedStyle.Render(" "+versionCell)
 
@@ -499,12 +517,14 @@ func (m model) renderTableView() string {
 			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
 			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
 			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
+			statusCell := fmt.Sprintf("%-*s", statusCol, status)
 			priorityCell := fmt.Sprintf("%-*s", priorityCol, priority)
 			versionCell := fmt.Sprintf("%-*s", versionCol, fixVersions)
 
 			row := tableRowStyle.Render(typeCell) +
 				tableCellKeyStyle.Render(" "+keyCell) +
 				tableRowStyle.Render(" "+summaryCell) +
+				tableCellStatusStyle.Render(" "+statusCell) +
 				tableCellPriorityStyle.Render(" "+priorityCell) +
 				tableCellFixVersionStyle.Render(" "+versionCell)
 
