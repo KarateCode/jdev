@@ -35,6 +35,7 @@ type filterType int
 const (
 	filterDevReview filterType = iota
 	filterAssignedToMe
+	filterReleaseTasks
 )
 
 func (f filterType) title() string {
@@ -43,6 +44,8 @@ func (f filterType) title() string {
 		return "Dev Review"
 	case filterAssignedToMe:
 		return "Issues Assigned to Me"
+	case filterReleaseTasks:
+		return "Release Tasks"
 	default:
 		return "Issues"
 	}
@@ -178,7 +181,7 @@ func getIssueTypeIcon(issueType string) string {
 	case "Bug":
 		return "🐛"
 	case "DevOps":
-		return devOpsIconStyle.Render("</>")
+		return devOpsIconStyle.Render("</>  ")
 	default:
 		return issueType
 	}
@@ -203,6 +206,8 @@ func fetchIssues(filter filterType) tea.Cmd {
 			}
 			me := strings.TrimSpace(string(meOutput))
 			cmd = exec.Command("jira", "issue", "list", "-a"+me, "--raw")
+		case filterReleaseTasks:
+			cmd = exec.Command("jira", "issue", "list", "-q", "issuetype = 'Release Task' AND resolution = Unresolved", "--raw")
 		default:
 			cmd = exec.Command("jira", "issue", "list", "-sDev Review", "--raw")
 		}
@@ -267,10 +272,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tableView = !m.tableView
 			return m, nil
 		case "f":
-			// Toggle filter
-			if m.filter == filterDevReview {
+			// Cycle through filters
+			switch m.filter {
+			case filterDevReview:
 				m.filter = filterAssignedToMe
-			} else {
+			case filterAssignedToMe:
+				m.filter = filterReleaseTasks
+			case filterReleaseTasks:
 				m.filter = filterDevReview
 			}
 			m.loading = true
