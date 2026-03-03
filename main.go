@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -236,13 +237,14 @@ func fetchIssues(filter filterType) tea.Cmd {
 	}
 }
 
-func initialModel() model {
+func initialModel(tableView bool) model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	return model{
-		loading: true,
-		spinner: s,
+		loading:   true,
+		spinner:   s,
+		tableView: tableView,
 	}
 }
 
@@ -591,7 +593,18 @@ func (m model) View() string {
 }
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	toggleView := flag.String("toggleview", "", "Initial view mode: 'table' or 'column'")
+	flag.Parse()
+
+	// Determine initial view based on flag
+	tableView := false
+	if *toggleView == "table" {
+		tableView = true
+	} else if *toggleView == "column" {
+		tableView = false
+	}
+
+	p := tea.NewProgram(initialModel(tableView), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)
