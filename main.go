@@ -237,7 +237,7 @@ func fetchIssues(filter filterType) tea.Cmd {
 	}
 }
 
-func initialModel(tableView bool) model {
+func initialModel(tableView bool, filter filterType) model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -245,6 +245,7 @@ func initialModel(tableView bool) model {
 		loading:   true,
 		spinner:   s,
 		tableView: tableView,
+		filter:    filter,
 	}
 }
 
@@ -594,6 +595,7 @@ func (m model) View() string {
 
 func main() {
 	toggleView := flag.String("toggleview", "", "Initial view mode: 'table' or 'column'")
+	filterFlag := flag.String("filter", "", "Initial filter: 'Dev Review', 'Me', or 'Release Tasks'")
 	flag.Parse()
 
 	// Determine initial view based on flag
@@ -604,7 +606,18 @@ func main() {
 		tableView = false
 	}
 
-	p := tea.NewProgram(initialModel(tableView), tea.WithAltScreen())
+	// Determine initial filter based on flag
+	filter := filterDevReview
+	switch *filterFlag {
+	case "Dev Review":
+		filter = filterDevReview
+	case "Me":
+		filter = filterAssignedToMe
+	case "Release Tasks":
+		filter = filterReleaseTasks
+	}
+
+	p := tea.NewProgram(initialModel(tableView, filter), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)
