@@ -185,13 +185,16 @@ var (
 )
 
 // Get icon for issue type
-func getIssueTypeIcon(issueType string) string {
+func getIssueTypeIcon(issueType string, selected bool) string {
 	switch issueType {
 	case "Story":
 		return "📖"
 	case "Bug":
 		return "🐛"
 	case "DevOps":
+		if selected {
+			return "</>  "
+		}
 		return devOpsIconStyle.Render("</>  ")
 	default:
 		return issueType
@@ -391,10 +394,10 @@ func (m model) renderListView() string {
 		}
 		fixVersions := strings.Join(versionNames, ", ")
 
-		// Get issue type icon
-		issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name)
-
 		if isSelected {
+			// Get issue type icon (unstyled for selected rows)
+			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, true)
+
 			// Pad lines to full width for background highlight
 			lineWidth := m.width
 			if lineWidth < 10 {
@@ -413,6 +416,9 @@ func (m model) renderListView() string {
 			b.WriteString("\n")
 			b.WriteString(fixVersionSelectedStyle.Render(fixVersionLine))
 		} else {
+			// Get issue type icon (styled for non-selected rows)
+			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, false)
+
 			b.WriteString("  ")
 			b.WriteString(issueTypeIcon + " ")
 			b.WriteString(keyStyle.Render(issue.Key))
@@ -463,9 +469,6 @@ func (m model) renderTableView() string {
 	for i, issue := range m.issues {
 		isSelected := i == m.cursor
 
-		// Get issue type icon
-		issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name)
-
 		// Truncate summary
 		summary := issue.Fields.Summary
 		if len(summary) > summaryCol {
@@ -489,6 +492,9 @@ func (m model) renderTableView() string {
 		}
 
 		if isSelected {
+			// Get issue type icon (unstyled for selected rows)
+			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, true)
+
 			// Build selected row with background
 			lineWidth := m.width
 			if lineWidth < 10 {
@@ -517,6 +523,9 @@ func (m model) renderTableView() string {
 
 			b.WriteString(row)
 		} else {
+			// Get issue type icon (styled for non-selected rows)
+			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, false)
+
 			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
 			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
 			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
