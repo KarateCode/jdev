@@ -191,6 +191,8 @@ func getIssueTypeIcon(issueType string, selected bool) string {
 		return "📖"
 	case "Bug":
 		return "🐛"
+	case "Sub-bug":
+		return "🪲"
 	case "DevOps":
 		if selected {
 			return "</>  "
