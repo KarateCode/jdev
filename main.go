@@ -228,6 +228,14 @@ func fetchIssues(filter filterType) tea.Cmd {
 
 		output, err := cmd.Output()
 		if err != nil {
+			// Jira CLI returns exit code 1 when no issues are found
+			// Check if this is just an empty result rather than a real error
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				trimmed := strings.TrimSpace(string(output))
+				if len(trimmed) == 0 || trimmed == "[]" {
+					return issuesMsg([]Issue{})
+				}
+			}
 			return errMsg(err)
 		}
 
@@ -558,7 +566,7 @@ func (m model) View() string {
 	}
 
 	if len(m.issues) == 0 {
-		return "No issues found.\n\nPress 'r' to refresh, 'q' to quit."
+		return fmt.Sprintf("\nNo tickets found with status '%s'.\n\n(Press 'r' to refresh, 'q' to quit.)", m.filter.title())
 	}
 
 	var content string
