@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -57,16 +58,17 @@ func (f filterType) title() string {
 
 // Model holds the application state
 type model struct {
-	issues    []Issue
-	cursor    int
-	width     int
-	height    int
-	err       error
-	loading   bool
-	spinner   spinner.Model
-	showHelp  bool
-	tableView bool
-	filter    filterType
+	issues       []Issue
+	cursor       int
+	width        int
+	height       int
+	err          error
+	loading      bool
+	spinner      spinner.Model
+	showHelp     bool
+	tableView    bool
+	filter       filterType
+	statusMsg    string
 }
 
 // Styles
@@ -182,6 +184,10 @@ var (
 
 	devOpsIconStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("75")) // Blue
+
+	statusMsgStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("203")). // Red/orange for warnings
+			Bold(true)
 )
 
 // Get icon for issue type
@@ -207,6 +213,8 @@ func getIssueTypeIcon(issueType string, selected bool) string {
 type issuesMsg []Issue
 type errMsg error
 type viewFinishedMsg struct{ err error }
+type statusMsg struct{ text string }
+type clearStatusMsg struct{}
 
 // Fetch issues from Jira CLI
 func fetchIssues(filter filterType) tea.Cmd {
@@ -248,6 +256,12 @@ func fetchIssues(filter filterType) tea.Cmd {
 
 		return issuesMsg(issues)
 	}
+}
+
+func clearStatusAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
 }
 
 func initialModel(tableView bool, filter filterType) model {
@@ -314,8 +328,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Refresh issues
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
-		case "enter", "v":
-			// View the selected issue
+		case "v":
+			// View the selected issue in tmux popup
 			if len(m.issues) > 0 {
 				key := m.issues[m.cursor].Key
 				if os.Getenv("TMUX") != "" {
@@ -330,6 +344,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 					return viewFinishedMsg{err}
 				})
+			}
+		case "enter":
+			// Open gh dash in the right tmux pane with the associated PR
+			if len(m.issues) > 0 && os.Getenv("TMUX") != "" {
+				key := m.issues[m.cursor].Key
+
+				// Look up PR number from GitHub using the Jira key
+				prCmd := exec.Command("gh", "pr", "list",
+					"-R", "appropos/envoy-web",
+					"--search", key,
+					"--state", "all",
+					"--json", "number",
+					"--limit", "1",
+					"-q", ".[0].number")
+				prOutput, err := prCmd.Output()
+				if err != nil || len(strings.TrimSpace(string(prOutput))) == 0 {
+					m.statusMsg = fmt.Sprintf("No PR found for %s", key)
+					return m, clearStatusAfter(3 * time.Second)
+				}
+				prNumber := strings.TrimSpace(string(prOutput))
+
+				// Build the gh dash command for Nushell
+				ghDashCmd := fmt.Sprintf(`gh dash -c (mktemp --suffix .yml | do { let f = $in; "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" | save -f $f; $f })`, prNumber, prNumber)
+
+				// Send to the right tmux pane
+				cmd := exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m")
+				cmd.Run()
+				return m, nil
 			}
 		case "m":
 			// Move the selected issue
@@ -369,6 +411,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case viewFinishedMsg:
 		// Return from viewing issue, could handle error if needed
+		return m, nil
+
+	case clearStatusMsg:
+		m.statusMsg = ""
 		return m, nil
 	}
 
@@ -592,7 +638,8 @@ func (m model) View() string {
 			"",
 			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down      "),
 			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up        "),
-			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue     "),
+			keyStyle.Render("v         ") + descStyle.Render("  View issue     "),
+			keyStyle.Render("enter     ") + descStyle.Render("  Open PR in dash"),
 			keyStyle.Render("o         ") + descStyle.Render("  Open in browser"),
 			keyStyle.Render("m         ") + descStyle.Render("  Move issue     "),
 			keyStyle.Render("t         ") + descStyle.Render("  Toggle view    "),
@@ -607,6 +654,11 @@ func (m model) View() string {
 		helpBox := helpBoxStyle.Render(help)
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, helpBox)
+	}
+
+	// Append status message if present
+	if m.statusMsg != "" {
+		content += "\n" + statusMsgStyle.Render(m.statusMsg)
 	}
 
 	return content
