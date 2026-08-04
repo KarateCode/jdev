@@ -371,8 +371,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Send Ctrl+C first to close any existing gh dash, then send the command
 				exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", "C-c").Run()
 				time.Sleep(100 * time.Millisecond)
-				cmd := exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m")
-				cmd.Run()
+				exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m").Run()
+				exec.Command("tmux", "select-pane", "-R").Run()
 				return m, nil
 			}
 		case "m":
