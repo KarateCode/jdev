@@ -368,7 +368,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Build the gh dash command for Nushell
 				ghDashCmd := fmt.Sprintf(`gh dash -c (mktemp --suffix .yml | do { let f = $in; "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" | save -f $f; $f })`, prNumber, prNumber)
 
-				// Send to the right tmux pane
+				// Send Ctrl+C first to close any existing gh dash, then send the command
+				exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", "C-c").Run()
+				time.Sleep(100 * time.Millisecond)
 				cmd := exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m")
 				cmd.Run()
 				return m, nil
