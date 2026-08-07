@@ -185,6 +185,9 @@ var (
 	devOpsIconStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("75")) // Blue
 
+	releaseTaskIconStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("114")) // Green
+
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("203")). // Red/orange for warnings
 			Bold(true)
@@ -204,6 +207,11 @@ func getIssueTypeIcon(issueType string, selected bool) string {
 			return "</>  "
 		}
 		return devOpsIconStyle.Render("</>  ")
+	case "Release Task":
+		if selected {
+			return "↑    "
+		}
+		return releaseTaskIconStyle.Render("↑    ")
 	default:
 		return issueType
 	}
