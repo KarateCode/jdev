@@ -516,8 +516,12 @@ func (m model) renderListView() string {
 func (m model) renderTableView() string {
 	var b strings.Builder
 
-	// Title
-	b.WriteString(titleStyle.Render(m.filter.title()))
+	// Title (centered)
+	title := titleStyle.Render(m.filter.title())
+	if m.width > 0 {
+		title = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, title)
+	}
+	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	// Define column widths
