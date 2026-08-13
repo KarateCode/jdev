@@ -41,6 +41,7 @@ const (
 	filterDevReview filterType = iota
 	filterAssignedToMe
 	filterReleaseTasks
+	filterDevSupport
 )
 
 func (f filterType) title() string {
@@ -51,6 +52,8 @@ func (f filterType) title() string {
 		return "Issues Assigned to Me"
 	case filterReleaseTasks:
 		return "Release Tasks"
+	case filterDevSupport:
+		return "Dev Support"
 	default:
 		return "Issues"
 	}
@@ -240,6 +243,8 @@ func fetchIssues(filter filterType) tea.Cmd {
 			cmd = exec.Command("jira", "issue", "list", "-a"+me, "--raw")
 		case filterReleaseTasks:
 			cmd = exec.Command("jira", "issue", "list", "-q", "issuetype = 'Release Task' AND resolution = Unresolved", "--raw")
+		case filterDevSupport:
+			cmd = exec.Command("jira", "issue", "list", "-q", "project = EST AND status = 'Dev Support'", "--raw")
 		default:
 			cmd = exec.Command("jira", "issue", "list", "-sDev Review", "--raw")
 		}
@@ -327,6 +332,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case filterAssignedToMe:
 				m.filter = filterReleaseTasks
 			case filterReleaseTasks:
+				m.filter = filterDevSupport
+			case filterDevSupport:
 				m.filter = filterDevReview
 			}
 			m.loading = true
@@ -396,7 +403,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open the selected issue in browser
 			if len(m.issues) > 0 {
 				key := m.issues[m.cursor].Key
-				url := fmt.Sprintf("https://envoyplatform.atlassian.net/jira/software/c/projects/EP/boards/35?selectedIssue=%s", key)
+				var url string
+				if m.filter == filterDevSupport {
+					url = fmt.Sprintf("https://envoyplatform.atlassian.net/jira/software/c/projects/EST/boards/36?selectedIssue=%s", key)
+				} else {
+					url = fmt.Sprintf("https://envoyplatform.atlassian.net/jira/software/c/projects/EP/boards/35?selectedIssue=%s", key)
+				}
 				exec.Command("open", url).Run()
 				return m, nil
 			}
@@ -676,7 +688,7 @@ func (m model) View() string {
 
 func main() {
 	toggleView := flag.String("toggleview", "", "Initial view mode: 'table' or 'column'")
-	filterFlag := flag.String("filter", "", "Initial filter: 'Dev Review', 'Me', or 'Release Tasks'")
+	filterFlag := flag.String("filter", "", "Initial filter: 'Dev Review', 'Me', 'Release Tasks', or 'Dev Support'")
 	flag.Parse()
 
 	// Determine initial view based on flag
@@ -696,6 +708,8 @@ func main() {
 		filter = filterAssignedToMe
 	case "Release Tasks":
 		filter = filterReleaseTasks
+	case "Dev Support":
+		filter = filterDevSupport
 	}
 
 	p := tea.NewProgram(initialModel(tableView, filter), tea.WithAltScreen())
