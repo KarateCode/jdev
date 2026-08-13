@@ -347,15 +347,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// View the selected issue in tmux popup
 			if len(m.issues) > 0 {
 				key := m.issues[m.cursor].Key
+				// Determine view command - use custom script for EST tickets to show AI Analysis
+				var viewCmd string
+				if strings.HasPrefix(key, "EST-") {
+					// Find script path relative to executable
+					if exePath, err := os.Executable(); err == nil {
+						scriptPath := strings.TrimSuffix(exePath, "/jdev") + "/view-issue.sh"
+						if _, err := os.Stat(scriptPath); err == nil {
+							viewCmd = fmt.Sprintf("%s %s | less -R", scriptPath, key)
+						}
+					}
+				}
+				if viewCmd == "" {
+					viewCmd = fmt.Sprintf("jira issue view %s --comments 50", key)
+				}
+
 				if os.Getenv("TMUX") != "" {
 					// Running inside tmux, use popup
 					cmd := exec.Command("tmux", "display-popup", "-E", "-w", "80%", "-h", "80%", "-x", "10", "-y", "5",
-						fmt.Sprintf("jira issue view %s --comments 50", key))
+						"bash", "-c", viewCmd)
 					cmd.Run()
 					return m, nil
 				}
 				// Fallback: suspend TUI and run directly
-				cmd := exec.Command("jira", "issue", "view", key, "--comments", "50")
+				cmd := exec.Command("bash", "-c", viewCmd)
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 					return viewFinishedMsg{err}
 				})
