@@ -226,6 +226,11 @@ type errMsg error
 type viewFinishedMsg struct{ err error }
 type statusMsg struct{ text string }
 type clearStatusMsg struct{}
+type commentEditorFinishedMsg struct {
+	issueKey string
+	tempFile string
+	err      error
+}
 
 // Fetch issues from Jira CLI
 func fetchIssues(filter filterType) tea.Cmd {
@@ -427,6 +432,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				exec.Command("open", url).Run()
 				return m, nil
 			}
+		case "c":
+			// Add comment to the selected issue
+			if len(m.issues) > 0 {
+				key := m.issues[m.cursor].Key
+				// Create temp file for comment
+				tempFile := fmt.Sprintf("/tmp/jira-comment-%s.txt", key)
+				os.WriteFile(tempFile, []byte(""), 0644)
+
+				// Get editor from environment, default to vi
+				editor := os.Getenv("EDITOR")
+				if editor == "" {
+					editor = "vi"
+				}
+
+				// Open editor
+				cmd := exec.Command(editor, tempFile)
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+					return commentEditorFinishedMsg{issueKey: key, tempFile: tempFile, err: err}
+				})
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -449,6 +474,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewFinishedMsg:
 		// Return from viewing issue, could handle error if needed
 		return m, nil
+
+	case commentEditorFinishedMsg:
+		// Editor closed, check if we should submit the comment
+		defer os.Remove(msg.tempFile)
+
+		if msg.err != nil {
+			m.statusMsg = "Comment cancelled"
+			return m, clearStatusAfter(3 * time.Second)
+		}
+
+		// Read the comment content
+		content, err := os.ReadFile(msg.tempFile)
+		if err != nil {
+			m.statusMsg = "Failed to read comment"
+			return m, clearStatusAfter(3 * time.Second)
+		}
+
+		// Check if comment is empty
+		trimmedContent := strings.TrimSpace(string(content))
+		if trimmedContent == "" {
+			m.statusMsg = "Comment cancelled (empty)"
+			return m, clearStatusAfter(3 * time.Second)
+		}
+
+		// Submit the comment
+		cmd := exec.Command("jira", "issue", "comment", "add", msg.issueKey, "--template", msg.tempFile)
+		if err := cmd.Run(); err != nil {
+			m.statusMsg = fmt.Sprintf("Failed to add comment: %v", err)
+			return m, clearStatusAfter(3 * time.Second)
+		}
+
+		m.statusMsg = fmt.Sprintf("Comment added to %s", msg.issueKey)
+		return m, clearStatusAfter(3 * time.Second)
 
 	case clearStatusMsg:
 		m.statusMsg = ""
@@ -680,6 +738,7 @@ func (m model) View() string {
 			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down      "),
 			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up        "),
 			keyStyle.Render("v         ") + descStyle.Render("  View issue     "),
+			keyStyle.Render("c         ") + descStyle.Render("  Add comment    "),
 			keyStyle.Render("enter     ") + descStyle.Render("  Open PR in dash"),
 			keyStyle.Render("o         ") + descStyle.Render("  Open in browser"),
 			keyStyle.Render("m         ") + descStyle.Render("  Move issue     "),
