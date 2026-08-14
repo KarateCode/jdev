@@ -1,5 +1,5 @@
 #!/bin/bash
-# View a Jira issue with AI Analysis support for EST tickets
+# View a Jira issue with AI Analysis support
 # Usage: view-issue.sh <ISSUE-KEY> [--comments N]
 
 ISSUE_KEY="$1"
@@ -50,20 +50,17 @@ extract_adf_text() {
 # Show the standard jira view first (without comments initially)
 jira issue view "$ISSUE_KEY" --plain
 
-# Check if this is an EST ticket
-if [[ "$ISSUE_KEY" == EST-* ]]; then
-    # Fetch the AI Analysis field
-    AI_ANALYSIS=$(jira issue view "$ISSUE_KEY" --raw 2>/dev/null | jq -r '.fields.customfield_11723 // empty')
-    
-    if [[ -n "$AI_ANALYSIS" && "$AI_ANALYSIS" != "null" ]]; then
-        echo ""
-        echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-        echo -e "\033[1;33m📊 AI Analysis\033[0m"
-        echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-        echo ""
-        echo "$AI_ANALYSIS" | extract_adf_text
-        echo ""
-    fi
+# Fetch the AI Analysis field (available on both EST and EP tickets)
+AI_ANALYSIS=$(jira issue view "$ISSUE_KEY" --raw 2>/dev/null | jq -r '.fields.customfield_11723 // empty')
+
+if [[ -n "$AI_ANALYSIS" && "$AI_ANALYSIS" != "null" ]]; then
+    echo ""
+    echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo -e "\033[1;33m📊 AI Analysis\033[0m"
+    echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo ""
+    echo "$AI_ANALYSIS" | extract_adf_text
+    echo ""
 fi
 
 # Now show comments

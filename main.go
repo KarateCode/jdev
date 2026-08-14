@@ -349,18 +349,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
 		case "v":
-			// View the selected issue in tmux popup
+			// View the selected issue
 			if len(m.issues) > 0 {
 				key := m.issues[m.cursor].Key
-				// Determine view command - use custom script for EST tickets to show AI Analysis
+				// Use custom script to show AI Analysis (if available)
 				var viewCmd string
-				if strings.HasPrefix(key, "EST-") {
-					// Find script path relative to executable
-					if exePath, err := os.Executable(); err == nil {
-						scriptPath := strings.TrimSuffix(exePath, "/jdev") + "/view-issue.sh"
-						if _, err := os.Stat(scriptPath); err == nil {
-							viewCmd = fmt.Sprintf("%s %s | less -R", scriptPath, key)
-						}
+				if exePath, err := os.Executable(); err == nil {
+					scriptPath := strings.TrimSuffix(exePath, "/jdev") + "/view-issue.sh"
+					if _, err := os.Stat(scriptPath); err == nil {
+						viewCmd = fmt.Sprintf("%s %s | less -R", scriptPath, key)
 					}
 				}
 				if viewCmd == "" {
