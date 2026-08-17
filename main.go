@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -355,7 +356,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Use custom script to show AI Analysis (if available)
 				var viewCmd string
 				if exePath, err := os.Executable(); err == nil {
-					scriptPath := strings.TrimSuffix(exePath, "/jdev") + "/view-issue.sh"
+					// Resolve symlinks to find the actual binary location
+					if resolvedPath, err := filepath.EvalSymlinks(exePath); err == nil {
+						exePath = resolvedPath
+					}
+					scriptPath := filepath.Join(filepath.Dir(exePath), "view-issue.sh")
 					if _, err := os.Stat(scriptPath); err == nil {
 						viewCmd = fmt.Sprintf("%s %s | less -R", scriptPath, key)
 					}
