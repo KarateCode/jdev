@@ -371,7 +371,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if os.Getenv("TMUX") != "" {
 					// Running inside tmux, use popup
-					cmd := exec.Command("tmux", "display-popup", "-E", "-w", "80%", "-h", "80%", "-x", "10", "-y", "5",
+					cmd := exec.Command("tmux", "display-popup", "-E", "-w", "100", "-h", "80%", "-x", "C", "-y", "C",
 						"bash", "-c", viewCmd)
 					cmd.Run()
 					return m, nil
