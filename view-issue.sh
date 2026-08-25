@@ -63,6 +63,21 @@ if [[ -n "$AI_ANALYSIS" && "$AI_ANALYSIS" != "null" ]]; then
     echo ""
 fi
 
+# Fetch and display subtasks (reuse the raw data we already fetched, or fetch again)
+RAW_DATA=$(jira issue view "$ISSUE_KEY" --raw 2>/dev/null)
+SUBTASKS=$(echo "$RAW_DATA" | jq -r '.fields.subtasks // []')
+SUBTASK_COUNT=$(echo "$SUBTASKS" | jq 'length')
+
+if [[ "$SUBTASK_COUNT" -gt 0 ]]; then
+    echo ""
+    echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo -e "\033[1;33m📋 Sub-issues ($SUBTASK_COUNT)\033[0m"
+    echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo ""
+    echo "$SUBTASKS" | jq -r '.[] | "  \(if .fields.issuetype.name == "Sub-bug" then "🪲" else "☑" end)  \(.key)  [\(.fields.status.name)]  \(.fields.summary)"'
+    echo ""
+fi
+
 # Now show comments
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e "\033[1;33m💬 Comments\033[0m"

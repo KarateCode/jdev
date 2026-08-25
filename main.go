@@ -32,6 +32,7 @@ type Issue struct {
 		Status struct {
 			Name string `json:"name"`
 		} `json:"status"`
+		Subtasks []Issue `json:"subtasks"`
 	} `json:"fields"`
 }
 
@@ -73,6 +74,11 @@ type model struct {
 	tableView    bool
 	filter       filterType
 	statusMsg    string
+
+	// Sub-issue navigation
+	parentIssue  *Issue   // Non-nil when viewing sub-issues
+	parentCursor int      // Remember cursor position in parent view
+	parentIssues []Issue  // Remember parent issues list for returning
 }
 
 // Styles
@@ -192,6 +198,9 @@ var (
 	releaseTaskIconStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("114")) // Green
 
+	taskIconStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("75")) // Blue
+
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("203")). // Red/orange for warnings
 			Bold(true)
@@ -216,6 +225,11 @@ func getIssueTypeIcon(issueType string, selected bool) string {
 			return "↑    "
 		}
 		return releaseTaskIconStyle.Render("↑    ")
+	case "Task":
+		if selected {
+			return "☑    "
+		}
+		return taskIconStyle.Render("☑    ")
 	default:
 		return issueType
 	}
@@ -231,6 +245,10 @@ type commentEditorFinishedMsg struct {
 	issueKey string
 	tempFile string
 	err      error
+}
+type subIssuesMsg struct {
+	parentIssue Issue
+	subIssues   []Issue
 }
 
 // Fetch issues from Jira CLI
@@ -274,6 +292,31 @@ func fetchIssues(filter filterType) tea.Cmd {
 		}
 
 		return issuesMsg(issues)
+	}
+}
+
+// Fetch sub-issues for a parent issue
+func fetchSubIssues(parentIssue Issue) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("jira", "issue", "list", "-P", parentIssue.Key, "--raw")
+		output, err := cmd.Output()
+		if err != nil {
+			// Jira CLI returns exit code 1 when no issues are found
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				trimmed := strings.TrimSpace(string(output))
+				if len(trimmed) == 0 || trimmed == "[]" {
+					return subIssuesMsg{parentIssue: parentIssue, subIssues: []Issue{}}
+				}
+			}
+			return errMsg(err)
+		}
+
+		var issues []Issue
+		if err := json.Unmarshal(output, &issues); err != nil {
+			return errMsg(err)
+		}
+
+		return subIssuesMsg{parentIssue: parentIssue, subIssues: issues}
 	}
 }
 
@@ -454,6 +497,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return commentEditorFinishedMsg{issueKey: key, tempFile: tempFile, err: err}
 				})
 			}
+		case "s":
+			// Drill into sub-issues of the selected issue
+			if len(m.issues) > 0 && m.parentIssue == nil {
+				issue := m.issues[m.cursor]
+				// Store current state for returning
+				m.parentIssues = m.issues
+				m.parentCursor = m.cursor
+				m.parentIssue = &issue
+				m.loading = true
+				m.cursor = 0
+				return m, tea.Batch(m.spinner.Tick, fetchSubIssues(issue))
+			}
+		case "esc", "ctrl+g", "u":
+			// Return to parent view if we're in sub-issue view
+			if m.parentIssue != nil {
+				m.issues = m.parentIssues
+				m.cursor = m.parentCursor
+				m.parentIssue = nil
+				m.parentIssues = nil
+				m.parentCursor = 0
+				return m, nil
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -513,16 +578,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearStatusMsg:
 		m.statusMsg = ""
 		return m, nil
+
+	case subIssuesMsg:
+		m.issues = msg.subIssues
+		m.loading = false
+		if len(msg.subIssues) == 0 {
+			m.statusMsg = fmt.Sprintf("No sub-issues found for %s", msg.parentIssue.Key)
+			// Return to parent view since there are no sub-issues
+			m.issues = m.parentIssues
+			m.cursor = m.parentCursor
+			m.parentIssue = nil
+			m.parentIssues = nil
+			m.parentCursor = 0
+			return m, clearStatusAfter(3 * time.Second)
+		}
 	}
 
 	return m, nil
+}
+
+func (m model) currentTitle() string {
+	if m.parentIssue != nil {
+		return fmt.Sprintf("Sub-issues of %s", m.parentIssue.Key)
+	}
+	return m.filter.title()
 }
 
 func (m model) renderListView() string {
 	var b strings.Builder
 
 	// Title
-	b.WriteString(titleStyle.Render(m.filter.title()))
+	b.WriteString(titleStyle.Render(m.currentTitle()))
 	b.WriteString("\n\n")
 
 	for i, issue := range m.issues {
@@ -592,7 +678,7 @@ func (m model) renderTableView() string {
 	var b strings.Builder
 
 	// Title (centered)
-	title := titleStyle.Render(m.filter.title())
+	title := titleStyle.Render(m.currentTitle())
 	if m.width > 0 {
 		title = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, title)
 	}
@@ -651,6 +737,10 @@ func (m model) renderTableView() string {
 		if isSelected {
 			// Get issue type icon (unstyled for selected rows)
 			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, true)
+			// Add indicator if issue has subtasks
+			if len(issue.Fields.Subtasks) > 0 {
+				issueTypeIcon = strings.TrimRight(issueTypeIcon, " ") + "+ "
+			}
 
 			// Build selected row with background
 			lineWidth := m.width
@@ -682,6 +772,10 @@ func (m model) renderTableView() string {
 		} else {
 			// Get issue type icon (styled for non-selected rows)
 			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, false)
+			// Add indicator if issue has subtasks
+			if len(issue.Fields.Subtasks) > 0 {
+				issueTypeIcon = strings.TrimRight(issueTypeIcon, " ") + "+ "
+			}
 
 			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
 			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
@@ -737,19 +831,21 @@ func (m model) View() string {
 		lines := []string{
 			titleStyle.Render("Keyboard Shortcuts"),
 			"",
-			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down      "),
-			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up        "),
-			keyStyle.Render("v         ") + descStyle.Render("  View issue     "),
-			keyStyle.Render("c         ") + descStyle.Render("  Add comment    "),
-			keyStyle.Render("enter     ") + descStyle.Render("  Open PR in dash"),
-			keyStyle.Render("o         ") + descStyle.Render("  Open in browser"),
-			keyStyle.Render("m         ") + descStyle.Render("  Move issue     "),
-			keyStyle.Render("t         ") + descStyle.Render("  Toggle view    "),
-			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter  "),
-			keyStyle.Render("r         ") + descStyle.Render("  Refresh        "),
-			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit           "),
+			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down       "),
+			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up         "),
+			keyStyle.Render("v         ") + descStyle.Render("  View issue      "),
+			keyStyle.Render("s         ") + descStyle.Render("  View sub-issues "),
+			keyStyle.Render("u/Esc/C-g ") + descStyle.Render("  Back to parent  "),
+			keyStyle.Render("c         ") + descStyle.Render("  Add comment     "),
+			keyStyle.Render("enter     ") + descStyle.Render("  Open PR in dash "),
+			keyStyle.Render("o         ") + descStyle.Render("  Open in browser "),
+			keyStyle.Render("m         ") + descStyle.Render("  Move issue      "),
+			keyStyle.Render("t         ") + descStyle.Render("  Toggle view     "),
+			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter   "),
+			keyStyle.Render("r         ") + descStyle.Render("  Refresh         "),
+			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit            "),
 			"",
-			descStyle.Render("Press ?, Esc, or Ctrl+g to close"),
+			descStyle.Render("Press ?, Esc, or Ctrl+g to close "),
 		}
 
 		help := strings.Join(lines, "\n")
