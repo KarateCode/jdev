@@ -206,33 +206,55 @@ var (
 			Bold(true)
 )
 
-// Get icon for issue type
-func getIssueTypeIcon(issueType string, selected bool) string {
+// Get icon for issue type (returns icon and its visual width)
+func getIssueTypeIcon(issueType string, selected bool) (string, int) {
 	switch issueType {
 	case "Story":
-		return "📖"
+		return "📖", 2
 	case "Bug":
-		return "🐛"
+		return "🐛", 2
 	case "Sub-bug":
-		return "🪲"
+		return "🪲", 2
 	case "DevOps":
 		if selected {
-			return "</>  "
+			return "</>", 3
 		}
-		return devOpsIconStyle.Render("</>  ")
+		return devOpsIconStyle.Render("</>"), 3
 	case "Release Task":
 		if selected {
-			return "↑    "
+			return "↑", 1
 		}
-		return releaseTaskIconStyle.Render("↑    ")
+		return releaseTaskIconStyle.Render("↑"), 1
 	case "Task":
 		if selected {
-			return "☑    "
+			return "☑", 1
 		}
-		return taskIconStyle.Render("☑    ")
+		return taskIconStyle.Render("☑"), 1
 	default:
-		return issueType
+		return issueType, len(issueType)
 	}
+}
+
+// Format issue type cell with optional subtask indicator, padded to targetWidth
+// Triangle indicator goes on the far right, with padding between icon and triangle
+func formatTypeCell(issueType string, hasSubtasks bool, selected bool, targetWidth int) string {
+	icon, iconWidth := getIssueTypeIcon(issueType, selected)
+
+	if hasSubtasks {
+		// icon + padding + triangle
+		padding := targetWidth - iconWidth - 1
+		if padding < 0 {
+			padding = 0
+		}
+		return icon + strings.Repeat(" ", padding) + "▶"
+	}
+
+	// No subtasks: icon + padding
+	padding := targetWidth - iconWidth
+	if padding < 0 {
+		padding = 0
+	}
+	return icon + strings.Repeat(" ", padding)
 }
 
 // Messages
@@ -635,7 +657,7 @@ func (m model) renderListView() string {
 
 		if isSelected {
 			// Get issue type icon (unstyled for selected rows)
-			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, true)
+			issueTypeIcon, _ := getIssueTypeIcon(issue.Fields.IssueType.Name, true)
 
 			// Pad lines to full width for background highlight
 			lineWidth := m.width
@@ -656,7 +678,7 @@ func (m model) renderListView() string {
 			b.WriteString(fixVersionSelectedStyle.Render(fixVersionLine))
 		} else {
 			// Get issue type icon (styled for non-selected rows)
-			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, false)
+			issueTypeIcon, _ := getIssueTypeIcon(issue.Fields.IssueType.Name, false)
 
 			b.WriteString("  ")
 			b.WriteString(issueTypeIcon + " ")
@@ -686,7 +708,7 @@ func (m model) renderTableView() string {
 	b.WriteString("\n\n")
 
 	// Define column widths
-	typeCol := 4
+	typeCol := 6
 	keyCol := 12
 	statusCol := 12
 	priorityCol := 10
@@ -735,12 +757,9 @@ func (m model) renderTableView() string {
 		}
 
 		if isSelected {
-			// Get issue type icon (unstyled for selected rows)
-			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, true)
-			// Add indicator if issue has subtasks
-			if len(issue.Fields.Subtasks) > 0 {
-				issueTypeIcon = strings.TrimRight(issueTypeIcon, " ") + "+ "
-			}
+			// Format type cell with subtask indicator
+			hasSubtasks := len(issue.Fields.Subtasks) > 0
+			issueTypeIcon := formatTypeCell(issue.Fields.IssueType.Name, hasSubtasks, true, typeCol)
 
 			// Build selected row with background
 			lineWidth := m.width
@@ -748,7 +767,7 @@ func (m model) renderTableView() string {
 				lineWidth = 80
 			}
 
-			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
+			typeCell := " " + issueTypeIcon
 			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
 			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
 			statusCell := fmt.Sprintf("%-*s", statusCol, status)
@@ -770,14 +789,11 @@ func (m model) renderTableView() string {
 
 			b.WriteString(row)
 		} else {
-			// Get issue type icon (styled for non-selected rows)
-			issueTypeIcon := getIssueTypeIcon(issue.Fields.IssueType.Name, false)
-			// Add indicator if issue has subtasks
-			if len(issue.Fields.Subtasks) > 0 {
-				issueTypeIcon = strings.TrimRight(issueTypeIcon, " ") + "+ "
-			}
+			// Format type cell with subtask indicator
+			hasSubtasks := len(issue.Fields.Subtasks) > 0
+			issueTypeIcon := formatTypeCell(issue.Fields.IssueType.Name, hasSubtasks, false, typeCol)
 
-			typeCell := fmt.Sprintf(" %-*s", typeCol, issueTypeIcon)
+			typeCell := " " + issueTypeIcon
 			keyCell := fmt.Sprintf("%-*s", keyCol, issue.Key)
 			summaryCell := fmt.Sprintf("%-*s", summaryCol, summary)
 			statusCell := fmt.Sprintf("%-*s", statusCol, status)
