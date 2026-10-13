@@ -448,34 +448,70 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 		case "enter":
-			// Open gh dash in the right tmux pane with the associated PR
-			if len(m.issues) > 0 && os.Getenv("TMUX") != "" {
-				key := m.issues[m.cursor].Key
+			if len(m.issues) > 0 {
+				if m.tableView {
+					// In table mode, Enter views the issue (same as 'v')
+					key := m.issues[m.cursor].Key
+					var viewCmd string
+					if exePath, err := os.Executable(); err == nil {
+						if resolvedPath, err := filepath.EvalSymlinks(exePath); err == nil {
+							exePath = resolvedPath
+						}
+						scriptPath := filepath.Join(filepath.Dir(exePath), "view-issue.sh")
+						if _, err := os.Stat(scriptPath); err == nil {
+							viewCmd = fmt.Sprintf("%s %s | less -R", scriptPath, key)
+						}
+					}
+					if viewCmd == "" {
+						viewCmd = fmt.Sprintf("jira issue view %s --comments 50", key)
+					}
 
-				// Look up PR number from GitHub using the Jira key
-				prCmd := exec.Command("gh", "pr", "list",
-					"-R", "appropos/envoy-web",
-					"--search", key,
-					"--state", "all",
-					"--json", "number",
-					"--limit", "1",
-					"-q", ".[0].number")
-				prOutput, err := prCmd.Output()
-				if err != nil || len(strings.TrimSpace(string(prOutput))) == 0 {
-					m.statusMsg = fmt.Sprintf("No PR found for %s", key)
-					return m, clearStatusAfter(3 * time.Second)
+					if os.Getenv("TMUX") != "" {
+						cmd := exec.Command("tmux", "display-popup", "-E", "-w", "100", "-h", "80%", "-x", "C", "-y", "C",
+							"bash", "-c", viewCmd)
+						cmd.Run()
+						return m, nil
+					}
+					cmd := exec.Command("bash", "-c", viewCmd)
+					return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+						return viewFinishedMsg{err}
+					})
+				} else if os.Getenv("TMUX") != "" {
+					// In column mode, open gh dash in the right tmux pane with the associated PR
+					key := m.issues[m.cursor].Key
+
+					// Look up PR number from GitHub using the Jira key
+					prCmd := exec.Command("gh", "pr", "list",
+						"-R", "appropos/envoy-web",
+						"--search", key,
+						"--state", "all",
+						"--json", "number",
+						"--limit", "1",
+						"-q", ".[0].number")
+					prOutput, err := prCmd.Output()
+					prNumber := strings.TrimSpace(string(prOutput))
+					if err != nil || prNumber == "" {
+						m.statusMsg = fmt.Sprintf("No PR found for %s (err=%v, out=%q)", key, err, string(prOutput))
+						return m, clearStatusAfter(5 * time.Second)
+					}
+					m.statusMsg = fmt.Sprintf("Found PR #%s for %s", prNumber, key)
+					// Clear status after commands run
+					defer func() {
+						go func() {
+							time.Sleep(3 * time.Second)
+						}()
+					}()
+
+					// Build the gh dash command for Nushell
+					ghDashCmd := fmt.Sprintf(`gh dash -c (mktemp --suffix .yml | do { let f = $in; "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" | save -f $f; $f })`, prNumber, prNumber)
+
+					// Send Ctrl+C first to close any existing gh dash, then send the command
+					exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", "C-c").Run()
+					time.Sleep(100 * time.Millisecond)
+					exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m").Run()
+					exec.Command("tmux", "select-pane", "-R").Run()
+					return m, nil
 				}
-				prNumber := strings.TrimSpace(string(prOutput))
-
-				// Build the gh dash command for Nushell
-				ghDashCmd := fmt.Sprintf(`gh dash -c (mktemp --suffix .yml | do { let f = $in; "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" | save -f $f; $f })`, prNumber, prNumber)
-
-				// Send Ctrl+C first to close any existing gh dash, then send the command
-				exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", "C-c").Run()
-				time.Sleep(100 * time.Millisecond)
-				exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m").Run()
-				exec.Command("tmux", "select-pane", "-R").Run()
-				return m, nil
 			}
 		case "m":
 			// Move the selected issue
@@ -519,7 +555,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return commentEditorFinishedMsg{issueKey: key, tempFile: tempFile, err: err}
 				})
 			}
-		case "s":
+		case "s", "right":
 			// Drill into sub-issues of the selected issue
 			if len(m.issues) > 0 && m.parentIssue == nil {
 				issue := m.issues[m.cursor]
@@ -531,7 +567,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 				return m, tea.Batch(m.spinner.Tick, fetchSubIssues(issue))
 			}
-		case "esc", "ctrl+g", "u":
+		case "esc", "ctrl+g", "u", "left":
 			// Return to parent view if we're in sub-issue view
 			if m.parentIssue != nil {
 				m.issues = m.parentIssues
@@ -847,21 +883,20 @@ func (m model) View() string {
 		lines := []string{
 			titleStyle.Render("Keyboard Shortcuts"),
 			"",
-			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down       "),
-			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up         "),
-			keyStyle.Render("v         ") + descStyle.Render("  View issue      "),
-			keyStyle.Render("s         ") + descStyle.Render("  View sub-issues "),
-			keyStyle.Render("u/Esc/C-g ") + descStyle.Render("  Back to parent  "),
-			keyStyle.Render("c         ") + descStyle.Render("  Add comment     "),
-			keyStyle.Render("enter     ") + descStyle.Render("  Open PR in dash "),
-			keyStyle.Render("o         ") + descStyle.Render("  Open in browser "),
-			keyStyle.Render("m         ") + descStyle.Render("  Move issue      "),
-			keyStyle.Render("t         ") + descStyle.Render("  Toggle view     "),
-			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter   "),
-			keyStyle.Render("r         ") + descStyle.Render("  Refresh         "),
-			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit            "),
+			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down        "),
+			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up          "),
+			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue       "),
+			keyStyle.Render("s/→       ") + descStyle.Render("  View sub-issues  "),
+			keyStyle.Render("u/←/Esc   ") + descStyle.Render("  Back to parent   "),
+			keyStyle.Render("c         ") + descStyle.Render("  Add comment      "),
+			keyStyle.Render("o         ") + descStyle.Render("  Open in browser  "),
+			keyStyle.Render("m         ") + descStyle.Render("  Move issue       "),
+			keyStyle.Render("t         ") + descStyle.Render("  Toggle view      "),
+			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter    "),
+			keyStyle.Render("r         ") + descStyle.Render("  Refresh          "),
+			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit             "),
 			"",
-			descStyle.Render("Press ?, Esc, or Ctrl+g to close "),
+			descStyle.Render("Press ?, Esc, or Ctrl+g to close  "),
 		}
 
 		help := strings.Join(lines, "\n")
