@@ -478,6 +478,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					})
 				} else if os.Getenv("TMUX") != "" {
 					// In column mode, open gh dash in the right tmux pane with the associated PR
+
+					// Check if there's a pane to the right
+					checkCmd := exec.Command("tmux", "display-message", "-t", "{right-of}", "-p", "#{pane_id}")
+					if err := checkCmd.Run(); err != nil {
+						m.statusMsg = "No pane to the right"
+						return m, clearStatusAfter(3 * time.Second)
+					}
+
 					key := m.issues[m.cursor].Key
 
 					// Look up PR number from GitHub using the Jira key
@@ -495,20 +503,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, clearStatusAfter(5 * time.Second)
 					}
 					m.statusMsg = fmt.Sprintf("Found PR #%s for %s", prNumber, key)
-					// Clear status after commands run
-					defer func() {
-						go func() {
-							time.Sleep(3 * time.Second)
-						}()
-					}()
 
-					// Build the gh dash command for Nushell
-					ghDashCmd := fmt.Sprintf(`gh dash -c (mktemp --suffix .yml | do { let f = $in; "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" | save -f $f; $f })`, prNumber, prNumber)
+					// Build the gh dash command (zsh/bash compatible, macOS mktemp)
+					ghDashCmd := fmt.Sprintf(`f=$(mktemp).yml && echo "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" > "$f" && gh dash -c "$f"`, prNumber, prNumber)
 
 					// Send Ctrl+C first to close any existing gh dash, then send the command
-					exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", "C-c").Run()
+					exec.Command("tmux", "send-keys", "-t", "{right-of}", "C-c").Run()
 					time.Sleep(100 * time.Millisecond)
-					exec.Command("tmux", "send-keys", "-t", "secondary:Secondary.2", ghDashCmd, "C-m").Run()
+					exec.Command("tmux", "send-keys", "-t", "{right-of}", ghDashCmd, "C-m").Run()
 					exec.Command("tmux", "select-pane", "-R").Run()
 					return m, nil
 				}
