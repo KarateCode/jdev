@@ -84,43 +84,43 @@ type model struct {
 // Styles
 var (
 	keyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("86")). // Cyan
+			Foreground(lipgloss.Color("14")). // Bright cyan (ANSI)
 			Bold(true)
 
 	keySelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("86")).
+				Foreground(lipgloss.Color("14")).
 				Bold(true).
-				Background(lipgloss.Color("236"))
+				Background(lipgloss.Color("0"))
 
 	summaryStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")). // Light gray
+			Foreground(lipgloss.Color("7")). // White (ANSI)
 			PaddingLeft(1)
 
 	summarySelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("255")). // White
+				Foreground(lipgloss.Color("15")). // Bright white (ANSI)
 				PaddingLeft(1).
-				Background(lipgloss.Color("236"))
+				Background(lipgloss.Color("0"))
 
 	priorityStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")). // Orange
+			Foreground(lipgloss.Color("11")). // Bright yellow (ANSI)
 			PaddingLeft(1)
 
 	prioritySelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")). // Orange
+				Foreground(lipgloss.Color("11")). // Bright yellow (ANSI)
 				PaddingLeft(1).
-				Background(lipgloss.Color("236"))
+				Background(lipgloss.Color("0"))
 
 	fixVersionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("183")). // Purple
+			Foreground(lipgloss.Color("13")). // Bright magenta (ANSI)
 			PaddingLeft(1)
 
 	fixVersionSelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("183")). // Purple
+				Foreground(lipgloss.Color("13")). // Bright magenta (ANSI)
 				PaddingLeft(1).
-				Background(lipgloss.Color("236"))
+				Background(lipgloss.Color("0"))
 
 	selectedIndicator = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("212")). // Pink
+				Foreground(lipgloss.Color("13")). // Bright magenta (ANSI)
 				Bold(true)
 
 	helpBoxStyle = lipgloss.NewStyle().
