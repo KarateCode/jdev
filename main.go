@@ -65,6 +65,7 @@ func (f filterType) title() string {
 type model struct {
 	issues       []Issue
 	cursor       int
+	scrollOffset int // Index of the first visible issue
 	width        int
 	height       int
 	err          error
@@ -75,10 +76,15 @@ type model struct {
 	filter       filterType
 	statusMsg    string
 
+	// Key of the issue focused when a refresh was requested, so focus can
+	// be restored once the new list arrives
+	refreshKey string
+
 	// Sub-issue navigation
-	parentIssue  *Issue   // Non-nil when viewing sub-issues
-	parentCursor int      // Remember cursor position in parent view
-	parentIssues []Issue  // Remember parent issues list for returning
+	parentIssue  *Issue  // Non-nil when viewing sub-issues
+	parentCursor int     // Remember cursor position in parent view
+	parentScroll int     // Remember scroll position in parent view
+	parentIssues []Issue // Remember parent issues list for returning
 }
 
 // Styles
@@ -204,7 +210,14 @@ var (
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("203")). // Red/orange for warnings
 			Bold(true)
+
+	scrollIndicatorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("8")) // Grey (ANSI)
 )
+
+// Lines each issue occupies in the list (column) view:
+// key, summary, priority, fix version, plus a blank separator
+const listItemHeight = 5
 
 // Get icon for issue type (returns icon and its visual width)
 func getIssueTypeIcon(issueType string, selected bool) (string, int) {
@@ -391,9 +404,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.issues)-1 {
 				m.cursor++
 			}
+		case "pgdown", "ctrl+d", "ctrl+f":
+			m.cursor += m.visibleCount()
+			if m.cursor > len(m.issues)-1 {
+				m.cursor = len(m.issues) - 1
+			}
+		case "pgup", "ctrl+u", "ctrl+b":
+			m.cursor -= m.visibleCount()
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+		case "home", "g":
+			m.cursor = 0
+		case "end", "G":
+			m.cursor = len(m.issues) - 1
 		case "t":
 			// Toggle between list and table view
 			m.tableView = !m.tableView
+			m.ensureCursorVisible()
 			return m, nil
 		case "f":
 			// Cycle through filters
@@ -409,9 +437,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.loading = true
 			m.cursor = 0
+			m.scrollOffset = 0
+			m.refreshKey = ""
 			return m, tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
 		case "r":
-			// Refresh issues
+			// Refresh issues, remembering what was focused so it can be
+			// restored (or approximated) once the new list arrives
+			m.refreshKey = ""
+			if len(m.issues) > 0 && m.cursor < len(m.issues) {
+				m.refreshKey = m.issues[m.cursor].Key
+			}
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, fetchIssues(m.filter))
 		case "v":
@@ -564,9 +599,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Store current state for returning
 				m.parentIssues = m.issues
 				m.parentCursor = m.cursor
+				m.parentScroll = m.scrollOffset
 				m.parentIssue = &issue
 				m.loading = true
 				m.cursor = 0
+				m.scrollOffset = 0
 				return m, tea.Batch(m.spinner.Tick, fetchSubIssues(issue))
 			}
 		case "esc", "ctrl+g", "u", "left":
@@ -574,9 +611,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.parentIssue != nil {
 				m.issues = m.parentIssues
 				m.cursor = m.parentCursor
+				m.scrollOffset = m.parentScroll
 				m.parentIssue = nil
 				m.parentIssues = nil
 				m.parentCursor = 0
+				m.parentScroll = 0
+				m.ensureCursorVisible()
 				return m, nil
 			}
 		}
@@ -586,8 +626,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case issuesMsg:
+		refreshKey := m.refreshKey
+		m.refreshKey = ""
 		m.issues = msg
 		m.loading = false
+
+		// Follow the previously focused issue to its new position. If it is
+		// gone from the list, stay where we were and let ensureCursorVisible
+		// scroll the (new) selection back into view.
+		if refreshKey != "" {
+			for i, issue := range m.issues {
+				if issue.Key == refreshKey {
+					m.cursor = i
+					break
+				}
+			}
+		}
 
 	case errMsg:
 		m.err = msg
@@ -636,8 +690,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, clearStatusAfter(3 * time.Second)
 
 	case clearStatusMsg:
+		// Falls through to ensureCursorVisible: losing the status line
+		// gives the list one more row of space
 		m.statusMsg = ""
-		return m, nil
 
 	case subIssuesMsg:
 		m.issues = msg.subIssues
@@ -647,13 +702,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Return to parent view since there are no sub-issues
 			m.issues = m.parentIssues
 			m.cursor = m.parentCursor
+			m.scrollOffset = m.parentScroll
 			m.parentIssue = nil
 			m.parentIssues = nil
 			m.parentCursor = 0
+			m.parentScroll = 0
+			m.ensureCursorVisible()
 			return m, clearStatusAfter(3 * time.Second)
 		}
 	}
 
+	m.ensureCursorVisible()
 	return m, nil
 }
 
@@ -664,6 +723,105 @@ func (m model) currentTitle() string {
 	return m.filter.title()
 }
 
+// Lines consumed by the title (and table header) before the first issue
+func (m model) headerHeight() int {
+	h := lipgloss.Height(titleStyle.Render(m.currentTitle())) + 1
+	if m.tableView {
+		h += lipgloss.Height(tableHeaderStyle.Render(" "))
+	}
+	return h
+}
+
+// Lines each issue occupies in the current view
+func (m model) itemHeight() int {
+	if m.tableView {
+		return 1
+	}
+	return listItemHeight
+}
+
+// Number of issues that fit on screen at once
+func (m model) visibleCount() int {
+	if m.height <= 0 {
+		// Size not known yet, assume everything fits
+		return len(m.issues)
+	}
+
+	footer := 1 // Scroll indicator
+	if m.statusMsg != "" {
+		footer++
+	}
+
+	available := m.height - m.headerHeight() - footer
+	n := available / m.itemHeight()
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// Index just past the last visible issue
+func (m model) visibleEnd() int {
+	end := m.scrollOffset + m.visibleCount()
+	if end > len(m.issues) {
+		end = len(m.issues)
+	}
+	return end
+}
+
+// Scroll the window so the cursor is always on screen
+func (m *model) ensureCursorVisible() {
+	if len(m.issues) == 0 {
+		m.cursor = 0
+		m.scrollOffset = 0
+		return
+	}
+
+	if m.cursor > len(m.issues)-1 {
+		m.cursor = len(m.issues) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+
+	n := m.visibleCount()
+	maxOffset := len(m.issues) - n
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.scrollOffset > maxOffset {
+		m.scrollOffset = maxOffset
+	}
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	}
+	if m.cursor >= m.scrollOffset+n {
+		m.scrollOffset = m.cursor - n + 1
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+}
+
+// Footer showing position in the list, empty when everything fits on screen
+func (m model) scrollIndicator() string {
+	n := m.visibleCount()
+	if len(m.issues) <= n {
+		return ""
+	}
+
+	end := m.visibleEnd()
+	parts := []string{fmt.Sprintf("%d-%d of %d", m.scrollOffset+1, end, len(m.issues))}
+	if m.scrollOffset > 0 {
+		parts = append([]string{fmt.Sprintf("↑ %d", m.scrollOffset)}, parts...)
+	}
+	if below := len(m.issues) - end; below > 0 {
+		parts = append(parts, fmt.Sprintf("%d ↓", below))
+	}
+
+	return scrollIndicatorStyle.Render("  " + strings.Join(parts, "  ·  "))
+}
+
 func (m model) renderListView() string {
 	var b strings.Builder
 
@@ -671,7 +829,8 @@ func (m model) renderListView() string {
 	b.WriteString(titleStyle.Render(m.currentTitle()))
 	b.WriteString("\n\n")
 
-	for i, issue := range m.issues {
+	for i := m.scrollOffset; i < m.visibleEnd(); i++ {
+		issue := m.issues[i]
 		isSelected := i == m.cursor
 
 		// Truncate summary to fit narrow width
@@ -769,7 +928,8 @@ func (m model) renderTableView() string {
 	b.WriteString("\n")
 
 	// Rows
-	for i, issue := range m.issues {
+	for i := m.scrollOffset; i < m.visibleEnd(); i++ {
+		issue := m.issues[i]
 		isSelected := i == m.cursor
 
 		// Truncate summary
@@ -866,6 +1026,10 @@ func (m model) View() string {
 		return fmt.Sprintf("\nNo tickets found with status '%s'.\n\n(Press 'r' to refresh, 'q' to quit.)", m.filter.title())
 	}
 
+	// Guard the render itself, so the selection is on screen even if the
+	// state was changed by a path that didn't scroll
+	m.ensureCursorVisible()
+
 	var content string
 	if m.tableView {
 		content = m.renderTableView()
@@ -885,18 +1049,20 @@ func (m model) View() string {
 		lines := []string{
 			titleStyle.Render("Keyboard Shortcuts"),
 			"",
-			keyStyle.Render("j/↓/ctrl+n") + descStyle.Render("  Move down        "),
-			keyStyle.Render("k/↑/ctrl+p") + descStyle.Render("  Move up          "),
-			keyStyle.Render("v/enter   ") + descStyle.Render("  View issue       "),
-			keyStyle.Render("s/→       ") + descStyle.Render("  View sub-issues  "),
-			keyStyle.Render("u/←/Esc   ") + descStyle.Render("  Back to parent   "),
-			keyStyle.Render("c         ") + descStyle.Render("  Add comment      "),
-			keyStyle.Render("o         ") + descStyle.Render("  Open in browser  "),
-			keyStyle.Render("m         ") + descStyle.Render("  Move issue       "),
-			keyStyle.Render("t         ") + descStyle.Render("  Toggle view      "),
-			keyStyle.Render("f         ") + descStyle.Render("  Toggle filter    "),
-			keyStyle.Render("r         ") + descStyle.Render("  Refresh          "),
-			keyStyle.Render("q/ctrl+c  ") + descStyle.Render("  Quit             "),
+			keyStyle.Render("j/↓/ctrl+n   ") + descStyle.Render("  Move down        "),
+			keyStyle.Render("k/↑/ctrl+p   ") + descStyle.Render("  Move up          "),
+			keyStyle.Render("ctrl+d/ctrl+u") + descStyle.Render("  Page down/up     "),
+			keyStyle.Render("g/G          ") + descStyle.Render("  Top/bottom       "),
+			keyStyle.Render("v/enter      ") + descStyle.Render("  View issue       "),
+			keyStyle.Render("s/→          ") + descStyle.Render("  View sub-issues  "),
+			keyStyle.Render("u/←/Esc      ") + descStyle.Render("  Back to parent   "),
+			keyStyle.Render("c            ") + descStyle.Render("  Add comment      "),
+			keyStyle.Render("o            ") + descStyle.Render("  Open in browser  "),
+			keyStyle.Render("m            ") + descStyle.Render("  Move issue       "),
+			keyStyle.Render("t            ") + descStyle.Render("  Toggle view      "),
+			keyStyle.Render("f            ") + descStyle.Render("  Toggle filter    "),
+			keyStyle.Render("r            ") + descStyle.Render("  Refresh          "),
+			keyStyle.Render("q/ctrl+c     ") + descStyle.Render("  Quit             "),
 			"",
 			descStyle.Render("Press ?, Esc, or Ctrl+g to close  "),
 		}
@@ -905,6 +1071,13 @@ func (m model) View() string {
 		helpBox := helpBoxStyle.Render(help)
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, helpBox)
+	}
+
+	content = strings.TrimRight(content, "\n")
+
+	// Append scroll position if the list doesn't fit on screen
+	if indicator := m.scrollIndicator(); indicator != "" {
+		content += "\n" + indicator
 	}
 
 	// Append status message if present
