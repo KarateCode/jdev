@@ -63,18 +63,19 @@ func (f filterType) title() string {
 
 // Model holds the application state
 type model struct {
-	issues       []Issue
-	cursor       int
-	scrollOffset int // Index of the first visible issue
-	width        int
-	height       int
-	err          error
-	loading      bool
-	spinner      spinner.Model
-	showHelp     bool
-	tableView    bool
-	filter       filterType
-	statusMsg    string
+	issues        []Issue
+	cursor        int
+	scrollOffset  int // Index of the first visible issue
+	width         int
+	height        int
+	err           error
+	loading       bool
+	spinner       spinner.Model
+	showHelp      bool
+	tableView     bool
+	filter        filterType
+	statusMsg     string
+	statusSuccess bool // Render the status message as a success rather than a warning
 
 	// Key of the issue focused when a refresh was requested, so focus can
 	// be restored once the new list arrives
@@ -210,6 +211,10 @@ var (
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("203")). // Red/orange for warnings
 			Bold(true)
+
+	statusMsgSuccessStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("10")). // Bright green (ANSI)
+				Bold(true)
 
 	scrollIndicatorStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("8")) // Grey (ANSI)
@@ -517,7 +522,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Check if there's a pane to the right
 					checkCmd := exec.Command("tmux", "display-message", "-t", "{right-of}", "-p", "#{pane_id}")
 					if err := checkCmd.Run(); err != nil {
-						m.statusMsg = "No pane to the right"
+						m.setStatus("No pane to the right")
 						return m, clearStatusAfter(3 * time.Second)
 					}
 
@@ -534,10 +539,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					prOutput, err := prCmd.Output()
 					prNumber := strings.TrimSpace(string(prOutput))
 					if err != nil || prNumber == "" {
-						m.statusMsg = fmt.Sprintf("No PR found for %s (err=%v, out=%q)", key, err, string(prOutput))
+						m.setStatus(fmt.Sprintf("No PR found for %s (err=%v, out=%q)", key, err, string(prOutput)))
 						return m, clearStatusAfter(5 * time.Second)
 					}
-					m.statusMsg = fmt.Sprintf("Found PR #%s for %s", prNumber, key)
+					m.setSuccessStatus(fmt.Sprintf("Found PR #%s for %s", prNumber, key))
 
 					// Build the gh dash command (zsh/bash compatible, macOS mktemp)
 					ghDashCmd := fmt.Sprintf(`f=$(mktemp).yml && echo "prSections: [{title: 'PR #%s', filters: 'is:pr %s'}]" > "$f" && gh dash -c "$f"`, prNumber, prNumber)
@@ -661,44 +666,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		defer os.Remove(msg.tempFile)
 
 		if msg.err != nil {
-			m.statusMsg = "Comment cancelled"
+			m.setStatus("Comment cancelled")
 			return m, clearStatusAfter(3 * time.Second)
 		}
 
 		// Read the comment content
 		content, err := os.ReadFile(msg.tempFile)
 		if err != nil {
-			m.statusMsg = "Failed to read comment"
+			m.setStatus("Failed to read comment")
 			return m, clearStatusAfter(3 * time.Second)
 		}
 
 		// Check if comment is empty
 		trimmedContent := strings.TrimSpace(string(content))
 		if trimmedContent == "" {
-			m.statusMsg = "Comment cancelled (empty)"
+			m.setStatus("Comment cancelled (empty)")
 			return m, clearStatusAfter(3 * time.Second)
 		}
 
 		// Submit the comment
 		cmd := exec.Command("jira", "issue", "comment", "add", msg.issueKey, "--template", msg.tempFile)
 		if err := cmd.Run(); err != nil {
-			m.statusMsg = fmt.Sprintf("Failed to add comment: %v", err)
+			m.setStatus(fmt.Sprintf("Failed to add comment: %v", err))
 			return m, clearStatusAfter(3 * time.Second)
 		}
 
-		m.statusMsg = fmt.Sprintf("Comment added to %s", msg.issueKey)
+		m.setSuccessStatus(fmt.Sprintf("Comment added to %s", msg.issueKey))
 		return m, clearStatusAfter(3 * time.Second)
 
 	case clearStatusMsg:
-		// Falls through to ensureCursorVisible: losing the status line
-		// gives the list one more row of space
+		// Falls through to ensureCursorVisible: losing the status rows
+		// gives the list more room
 		m.statusMsg = ""
+		m.statusSuccess = false
 
 	case subIssuesMsg:
 		m.issues = msg.subIssues
 		m.loading = false
 		if len(msg.subIssues) == 0 {
-			m.statusMsg = fmt.Sprintf("No sub-issues found for %s", msg.parentIssue.Key)
+			m.setStatus(fmt.Sprintf("No sub-issues found for %s", msg.parentIssue.Key))
 			// Return to parent view since there are no sub-issues
 			m.issues = m.parentIssues
 			m.cursor = m.parentCursor
@@ -721,6 +727,35 @@ func (m model) currentTitle() string {
 		return fmt.Sprintf("Sub-issues of %s", m.parentIssue.Key)
 	}
 	return m.filter.title()
+}
+
+// Show a warning/failure status message
+func (m *model) setStatus(text string) {
+	m.statusMsg = text
+	m.statusSuccess = false
+}
+
+// Show a success status message
+func (m *model) setSuccessStatus(text string) {
+	m.statusMsg = text
+	m.statusSuccess = true
+}
+
+// Green for the happy path, red/orange for warnings and failures
+func (m model) statusStyle() lipgloss.Style {
+	if m.statusSuccess {
+		return statusMsgSuccessStyle
+	}
+	return statusMsgStyle
+}
+
+// Rendered status message, including the blank row that separates it
+// from the list above
+func (m model) statusView() string {
+	if m.statusMsg == "" {
+		return ""
+	}
+	return "\n\n" + m.statusStyle().Render("  "+m.statusMsg)
 }
 
 // Lines consumed by the title (and table header) before the first issue
@@ -749,7 +784,7 @@ func (m model) visibleCount() int {
 
 	footer := 1 // Scroll indicator
 	if m.statusMsg != "" {
-		footer++
+		footer += 2 // Blank spacer row + the message
 	}
 
 	available := m.height - m.headerHeight() - footer
@@ -1081,9 +1116,7 @@ func (m model) View() string {
 	}
 
 	// Append status message if present
-	if m.statusMsg != "" {
-		content += "\n" + statusMsgStyle.Render(m.statusMsg)
-	}
+	content += m.statusView()
 
 	return content
 }

@@ -203,15 +203,75 @@ func TestResizeKeepsCursorVisible(t *testing.T) {
 }
 
 func TestStatusMessageDoesNotPushCursorOffScreen(t *testing.T) {
-	m := newTestModel(false, 45, 40)
-	m = send(m, key("G"))
-	m.statusMsg = "Found PR #1234 for EP-044"
-	assertFits(t, m, "status shown")
-	assertCursorVisible(t, m, "status shown")
+	for _, success := range []bool{true, false} {
+		for _, height := range []int{10, 24, 40} {
+			label := fmt.Sprintf("status(success=%v)/h%d", success, height)
 
+			m := newTestModel(false, 45, height)
+			m = send(m, key("G"))
+			if success {
+				m.setSuccessStatus("Found PR #1234 for EP-044")
+			} else {
+				m.setStatus("No PR found for EP-044")
+			}
+			assertFits(t, m, label+" shown")
+			assertCursorVisible(t, m, label+" shown")
+
+			m = send(m, clearStatusMsg{})
+			assertFits(t, m, label+" cleared")
+			assertCursorVisible(t, m, label+" cleared")
+		}
+	}
+}
+
+func TestStatusMessageSpacingAndColor(t *testing.T) {
+	m := newTestModel(false, 45, 40)
+	m.setSuccessStatus("Found PR #1234 for EP-044")
+
+	// A blank row separates the toast from the list above it
+	lines := strings.Split(m.View(), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("view has only %d lines", len(lines))
+	}
+	if spacer := strings.TrimSpace(lines[len(lines)-2]); spacer != "" {
+		t.Errorf("expected a blank spacer row above the toast, got %q", spacer)
+	}
+	if !strings.Contains(lines[len(lines)-1], "Found PR #1234 for EP-044") {
+		t.Errorf("toast not on the last line: %q", lines[len(lines)-1])
+	}
+
+	// Happy case is green, warnings stay red/orange
+	green := lipgloss.Color("10")
+	if got := statusMsgSuccessStyle.GetForeground(); got != green {
+		t.Errorf("success style foreground is %v, want bright green (10)", got)
+	}
+	if got := m.statusStyle().GetForeground(); got != green {
+		t.Errorf("success toast uses foreground %v, want bright green (10)", got)
+	}
+
+	m.setStatus("No PR found for EP-044")
+	if got := m.statusStyle().GetForeground(); got != statusMsgStyle.GetForeground() {
+		t.Errorf("warning toast uses foreground %v, want the warning colour", got)
+	}
+	if statusMsgSuccessStyle.GetForeground() == statusMsgStyle.GetForeground() {
+		t.Error("success and warning toasts are the same colour")
+	}
+}
+
+// A success toast must never linger as green once an error replaces it
+func TestStatusStyleResets(t *testing.T) {
+	m := newTestModel(false, 45, 40)
+	m.setSuccessStatus("Found PR #1234 for EP-044")
+	m.setStatus("No pane to the right")
+	if m.statusSuccess {
+		t.Error("statusSuccess still set after a warning status")
+	}
+
+	m.setSuccessStatus("Comment added to EP-001")
 	m = send(m, clearStatusMsg{})
-	assertFits(t, m, "status cleared")
-	assertCursorVisible(t, m, "status cleared")
+	if m.statusSuccess || m.statusMsg != "" {
+		t.Error("status not fully reset after clearStatusMsg")
+	}
 }
 
 func TestNoScrollIndicatorWhenEverythingFits(t *testing.T) {
